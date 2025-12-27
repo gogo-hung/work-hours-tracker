@@ -1,0 +1,8 @@
+export { LoginPage } from './LoginPage'
+export { RegisterPage } from './RegisterPage'
+export { SetupPage } from './SetupPage'
+export { DashboardPage } from './DashboardPage'
+export { HistoryPage } from './HistoryPage'
+export { SettingsPage } from './SettingsPage'
+export { SchedulePage } from './SchedulePage'
+export { default as TeamManagePage } from './TeamManagePage'

@@ -1,0 +1,26 @@
+[
+  {
+    "id": "40049282-61d6-405f-8418-2b2aa6a4c05b",
+    "userId": "eb491844-4d50-4dc9-89fc-4d0d49281e75",
+    "name": "元宵",
+    "hourlyRate": 220,
+    "maxHoursPerDay": 8,
+    "createdAt": "2025-12-26T14:18:51.017Z"
+  },
+  {
+    "id": "a0dcc868-0aff-4e2a-bcf6-6f9c3d9741ed",
+    "userId": "8e364a07-06b5-4061-b30d-49b5e726df88",
+    "name": "元宵",
+    "hourlyRate": 220,
+    "maxHoursPerDay": 8,
+    "createdAt": "2025-12-26T14:19:32.043Z"
+  },
+  {
+    "id": "a372b890-7364-43b5-9c9d-14e5f54534e1",
+    "userId": "4a795422-2e0a-4bb1-8c7d-b341767d12b4",
+    "name": "元宵",
+    "hourlyRate": 220,
+    "maxHoursPerDay": 8,
+    "createdAt": "2025-12-27T05:09:56.520Z"
+  }
+]
