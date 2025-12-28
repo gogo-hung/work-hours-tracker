@@ -2,56 +2,85 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
-const fs = require('fs');
+const mongoose = require('mongoose');
 const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// MongoDB 連接
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/work-hours-tracker';
+
+mongoose.connect(MONGODB_URI)
+  .then(() => console.log('✅ MongoDB 連接成功'))
+  .catch(err => console.error('❌ MongoDB 連接失敗:', err));
+
 // 中間件
 app.use(cors());
-app.use(express.json({ limit: '10mb' })); // 支援較大的 base64 圖片
+app.use(express.json({ limit: '10mb' }));
 
 // 提供靜態檔案 (前端 build 後的檔案)
 app.use(express.static(path.join(__dirname, '../dist')));
 
-// 資料檔案路徑
-const DATA_DIR = path.join(__dirname, 'data');
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
-const TEAMS_FILE = path.join(DATA_DIR, 'teams.json');
-const JOBS_FILE = path.join(DATA_DIR, 'jobs.json');
-const RECORDS_FILE = path.join(DATA_DIR, 'records.json');
-const SCHEDULES_FILE = path.join(DATA_DIR, 'schedules.json');
+// ==================== MongoDB Schemas ====================
+const userSchema = new mongoose.Schema({
+  id: { type: String, required: true, unique: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  name: { type: String, required: true },
+  role: { type: String, enum: ['employee', 'manager'], default: 'employee' },
+  avatar: String,
+  teamId: String,
+  createdAt: { type: Date, default: Date.now },
+  isPremium: { type: Boolean, default: false }
+});
 
-// 確保資料目錄存在
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
+const teamSchema = new mongoose.Schema({
+  id: { type: String, required: true, unique: true },
+  name: { type: String, required: true },
+  managerId: { type: String, required: true },
+  inviteCode: { type: String, required: true, unique: true },
+  createdAt: { type: Date, default: Date.now }
+});
 
-// 讀取資料
-function readData(filePath) {
-  try {
-    if (fs.existsSync(filePath)) {
-      const data = fs.readFileSync(filePath, 'utf8');
-      return JSON.parse(data);
-    }
-    return [];
-  } catch (error) {
-    console.error(`Error reading ${filePath}:`, error);
-    return [];
-  }
-}
+const jobSchema = new mongoose.Schema({
+  id: { type: String, required: true, unique: true },
+  userId: { type: String, required: true },
+  name: { type: String, required: true },
+  hourlyRate: { type: Number, required: true },
+  dailyLimit: Number,
+  color: String,
+  isActive: { type: Boolean, default: true },
+  createdAt: { type: Date, default: Date.now }
+});
 
-// 寫入資料
-function writeData(filePath, data) {
-  try {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
-    return true;
-  } catch (error) {
-    console.error(`Error writing ${filePath}:`, error);
-    return false;
-  }
-}
+const recordSchema = new mongoose.Schema({
+  id: { type: String, required: true, unique: true },
+  userId: { type: String, required: true },
+  jobId: { type: String, required: true },
+  clockIn: { type: Date, required: true },
+  clockInPhoto: String,
+  clockOut: Date,
+  clockOutPhoto: String,
+  date: String,
+  createdAt: { type: Date, default: Date.now }
+});
+
+const scheduleSchema = new mongoose.Schema({
+  id: { type: String, required: true, unique: true },
+  userId: { type: String, required: true },
+  jobId: { type: String, required: true },
+  dayOfWeek: { type: Number, required: true },
+  startTime: String,
+  endTime: String,
+  createdAt: { type: Date, default: Date.now }
+});
+
+const User = mongoose.model('User', userSchema);
+const Team = mongoose.model('Team', teamSchema);
+const Job = mongoose.model('Job', jobSchema);
+const Record = mongoose.model('Record', recordSchema);
+const Schedule = mongoose.model('Schedule', scheduleSchema);
 
 // 生成 6 位邀請碼
 function generateInviteCode() {
@@ -59,14 +88,15 @@ function generateInviteCode() {
 }
 
 // ==================== 管理後台首頁 ====================
-app.get('/', (req, res) => {
-  const users = readData(USERS_FILE);
-  const teams = readData(TEAMS_FILE);
-  const jobs = readData(JOBS_FILE);
-  const records = readData(RECORDS_FILE);
-  const schedules = readData(SCHEDULES_FILE);
-  
-  const html = `
+app.get('/', async (req, res) => {
+  try {
+    const users = await User.find({});
+    const teams = await Team.find({});
+    const jobs = await Job.find({});
+    const records = await Record.find({});
+    const schedules = await Schedule.find({});
+    
+    const html = `
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -92,78 +122,57 @@ app.get('/', (req, res) => {
     .badge-manager { background: #fef3c7; color: #d97706; }
     .badge-employee { background: #dbeafe; color: #2563eb; }
     .badge-premium { background: #dcfce7; color: #16a34a; }
-    .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
-    .btn-primary { background: #6366f1; color: white; }
-    .btn-success { background: #22c55e; color: white; }
-    .btn-danger { background: #ef4444; color: white; }
-    .btn:hover { opacity: 0.9; }
-    .actions { display: flex; gap: 8px; }
+    .success { background: #dcfce7; color: #16a34a; padding: 10px; border-radius: 8px; margin-bottom: 20px; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>🕐 工時計算 - 管理後台</h1>
+    <p class="success">✅ MongoDB 連接成功！資料永久保存</p>
     
     <div class="stats">
       <div class="stat-card">
-        <h3>👥 總用戶數</h3>
+        <h3>總用戶數</h3>
         <div class="number">${users.length}</div>
       </div>
       <div class="stat-card">
-        <h3>🏢 團隊數量</h3>
+        <h3>總團隊數</h3>
         <div class="number">${teams.length}</div>
       </div>
       <div class="stat-card">
-        <h3>💼 工作數量</h3>
+        <h3>總工作數</h3>
         <div class="number">${jobs.length}</div>
       </div>
       <div class="stat-card">
-        <h3>📋 打卡記錄</h3>
+        <h3>打卡記錄數</h3>
         <div class="number">${records.length}</div>
       </div>
     </div>
-    
+
     <div class="section">
       <h2>👥 用戶列表</h2>
       <table>
         <thead>
           <tr>
-            <th>ID</th>
-            <th>名稱</th>
+            <th>姓名</th>
             <th>Email</th>
             <th>角色</th>
-            <th>會員狀態</th>
-            <th>團隊</th>
-            <th>操作</th>
+            <th>註冊時間</th>
           </tr>
         </thead>
         <tbody>
-          ${users.map(u => {
-            const team = teams.find(t => t.id === u.teamId);
-            const displayName = (u.name || u.email || '').replace(/"/g, '&quot;');
-            return `
+          ${users.map(u => `
             <tr>
-              <td><code>${u.id.substring(0, 8)}...</code></td>
-              <td>${u.name || u.username || '-'}</td>
+              <td>${u.name}</td>
               <td>${u.email}</td>
-              <td><span class="badge badge-${u.role}">${u.role === 'manager' ? '主管' : '員工'}</span></td>
-              <td>${u.isPremium ? '<span class="badge badge-premium">Premium</span>' : '免費版'}</td>
-              <td>${team ? team.name : '-'}</td>
-              <td class="actions">
-                <button class="btn btn-success" onclick="togglePremium('${u.id}', ${!u.isPremium})">
-                  ${u.isPremium ? '取消 Premium' : '升級 Premium'}
-                </button>
-                <button class="btn btn-danger" onclick="deleteUser('${u.id}', &quot;${displayName}&quot;)">
-                  刪除
-                </button>
-              </td>
+              <td><span class="badge ${u.role === 'manager' ? 'badge-manager' : 'badge-employee'}">${u.role === 'manager' ? '主管' : '員工'}</span></td>
+              <td>${new Date(u.createdAt).toLocaleString('zh-TW')}</td>
             </tr>
-            `;
-          }).join('')}
+          `).join('')}
         </tbody>
       </table>
     </div>
-    
+
     <div class="section">
       <h2>🏢 團隊列表</h2>
       <table>
@@ -171,116 +180,75 @@ app.get('/', (req, res) => {
           <tr>
             <th>團隊名稱</th>
             <th>邀請碼</th>
-            <th>管理者</th>
-            <th>成員數</th>
             <th>建立時間</th>
           </tr>
         </thead>
         <tbody>
-          ${teams.map(t => {
-            const manager = users.find(u => u.id === t.managerId);
-            const memberCount = users.filter(u => u.teamId === t.id).length;
-            return `
+          ${teams.map(t => `
             <tr>
-              <td><strong>${t.name}</strong></td>
-              <td><code style="background:#f3f4f6;padding:4px 8px;border-radius:4px;font-size:16px;letter-spacing:2px;">${t.inviteCode}</code></td>
-              <td>${manager ? (manager.name || manager.email) : '-'}</td>
-              <td>${memberCount} 人</td>
-              <td>${new Date(t.createdAt).toLocaleDateString('zh-TW')}</td>
+              <td>${t.name}</td>
+              <td><code>${t.inviteCode}</code></td>
+              <td>${new Date(t.createdAt).toLocaleString('zh-TW')}</td>
             </tr>
-            `;
-          }).join('')}
-          ${teams.length === 0 ? '<tr><td colspan="5" style="text-align:center;color:#999;">尚無團隊</td></tr>' : ''}
+          `).join('')}
         </tbody>
       </table>
     </div>
   </div>
-  
-  <script>
-    async function togglePremium(userId, isPremium) {
-      try {
-        const res = await fetch('/api/users/' + userId, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ isPremium })
-        });
-        if (res.ok) {
-          location.reload();
-        } else {
-          alert('操作失敗');
-        }
-      } catch (e) {
-        alert('操作失敗: ' + e.message);
-      }
-    }
-    
-    async function deleteUser(userId, userName) {
-      if (!confirm('確定要刪除用戶「' + userName + '」嗎？\n\n此操作無法復原！')) {
-        return;
-      }
-      try {
-        const res = await fetch('/api/users/' + userId, {
-          method: 'DELETE'
-        });
-        if (res.ok) {
-          location.reload();
-        } else {
-          const data = await res.json();
-          alert('刪除失敗: ' + (data.error || '未知錯誤'));
-        }
-      } catch (e) {
-        alert('刪除失敗: ' + e.message);
-      }
-    }
-  </script>
 </body>
 </html>
-  `;
-  
-  res.send(html);
+    `;
+    res.send(html);
+  } catch (error) {
+    res.status(500).json({ error: '伺服器錯誤' });
+  }
 });
 
-// ==================== 用戶 API ====================
+// ==================== 認證 API ====================
 
 // 註冊
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { email, password, name, role } = req.body;
-    
-    if (!email || !password || !name) {
-      return res.status(400).json({ error: '請填寫所有必要欄位' });
-    }
-    
-    const users = readData(USERS_FILE);
+    const { email, password, name, role = 'employee' } = req.body;
     
     // 檢查 email 是否已存在
-    if (users.find(u => u.email === email)) {
-      return res.status(400).json({ error: '此 Email 已被註冊' });
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ error: 'Email 已被註冊' });
     }
     
     // 加密密碼
     const hashedPassword = await bcrypt.hash(password, 10);
     
-    const newUser = {
+    // 建立新用戶
+    const newUser = new User({
       id: uuidv4(),
       email,
       password: hashedPassword,
       name,
-      role: role || 'employee',
+      role,
       avatar: null,
       teamId: null,
-      createdAt: new Date().toISOString()
+      isPremium: false
+    });
+    
+    await newUser.save();
+    
+    // 返回用戶資料（不含密碼）
+    const userResponse = {
+      id: newUser.id,
+      email: newUser.email,
+      name: newUser.name,
+      role: newUser.role,
+      avatar: newUser.avatar,
+      teamId: newUser.teamId,
+      isPremium: newUser.isPremium
     };
     
-    users.push(newUser);
-    writeData(USERS_FILE, users);
-    
-    // 回傳不含密碼的用戶資料
-    const { password: _, ...userWithoutPassword } = newUser;
-    res.status(201).json(userWithoutPassword);
+    res.status(201).json(userResponse);
   } catch (error) {
-    console.error('Register error:', error);
-    res.status(500).json({ error: '註冊失敗' });
+    console.error('註冊錯誤:', error);
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
@@ -289,517 +257,491 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     
-    const users = readData(USERS_FILE);
-    const user = users.find(u => u.email === email);
-    
+    // 查找用戶
+    const user = await User.findOne({ email });
     if (!user) {
       return res.status(401).json({ error: 'Email 或密碼錯誤' });
     }
     
+    // 驗證密碼
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) {
       return res.status(401).json({ error: 'Email 或密碼錯誤' });
     }
     
-    const { password: _, ...userWithoutPassword } = user;
-    res.json(userWithoutPassword);
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ error: '登入失敗' });
-  }
-});
-
-// 更新用戶資料
-app.put('/api/users/:id', (req, res) => {
-  try {
-    const { id } = req.params;
-    const updates = req.body;
-    
-    const users = readData(USERS_FILE);
-    const index = users.findIndex(u => u.id === id);
-    
-    if (index === -1) {
-      return res.status(404).json({ error: '找不到用戶' });
+    // 如果用戶有團隊，獲取團隊資訊
+    let team = null;
+    if (user.teamId) {
+      team = await Team.findOne({ id: user.teamId });
     }
     
-    // 不允許更新密碼和 id
-    delete updates.password;
-    delete updates.id;
+    // 返回用戶資料
+    const userResponse = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      avatar: user.avatar,
+      teamId: user.teamId,
+      isPremium: user.isPremium
+    };
     
-    users[index] = { ...users[index], ...updates };
-    writeData(USERS_FILE, users);
-    
-    const { password: _, ...userWithoutPassword } = users[index];
-    res.json(userWithoutPassword);
+    res.json({ user: userResponse, team });
   } catch (error) {
-    console.error('Update user error:', error);
-    res.status(500).json({ error: '更新失敗' });
+    console.error('登入錯誤:', error);
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
-// 獲取用戶資料
-app.get('/api/users/:id', (req, res) => {
+// ==================== 用戶 API ====================
+
+// 獲取用戶資訊
+app.get('/api/users/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const users = readData(USERS_FILE);
-    const user = users.find(u => u.id === id);
-    
+    const user = await User.findOne({ id: req.params.id });
     if (!user) {
       return res.status(404).json({ error: '找不到用戶' });
     }
     
-    const { password: _, ...userWithoutPassword } = user;
-    res.json(userWithoutPassword);
+    const userResponse = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      avatar: user.avatar,
+      teamId: user.teamId,
+      isPremium: user.isPremium
+    };
+    
+    res.json(userResponse);
   } catch (error) {
-    console.error('Get user error:', error);
-    res.status(500).json({ error: '獲取用戶失敗' });
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
-// 刪除用戶
-app.delete('/api/users/:id', (req, res) => {
+// 更新用戶資訊
+app.put('/api/users/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const users = readData(USERS_FILE);
-    const userIndex = users.findIndex(u => u.id === id);
-    
-    if (userIndex === -1) {
+    const user = await User.findOne({ id: req.params.id });
+    if (!user) {
       return res.status(404).json({ error: '找不到用戶' });
     }
     
-    const deletedUser = users[userIndex];
+    const { name, avatar, teamId } = req.body;
     
-    // 刪除用戶
-    users.splice(userIndex, 1);
-    writeData(USERS_FILE, users);
+    if (name !== undefined) user.name = name;
+    if (avatar !== undefined) user.avatar = avatar;
+    if (teamId !== undefined) user.teamId = teamId;
     
-    // 同時刪除該用戶的相關資料
-    // 刪除工作
-    const jobs = readData(JOBS_FILE);
-    const filteredJobs = jobs.filter(j => j.userId !== id);
-    writeData(JOBS_FILE, filteredJobs);
+    await user.save();
     
-    // 刪除打卡記錄
-    const records = readData(RECORDS_FILE);
-    const filteredRecords = records.filter(r => r.userId !== id);
-    writeData(RECORDS_FILE, filteredRecords);
+    const userResponse = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      avatar: user.avatar,
+      teamId: user.teamId,
+      isPremium: user.isPremium
+    };
     
-    // 刪除排班
-    const schedules = readData(SCHEDULES_FILE);
-    const filteredSchedules = schedules.filter(s => s.userId !== id);
-    writeData(SCHEDULES_FILE, filteredSchedules);
-    
-    // 如果是主管，刪除其團隊
-    if (deletedUser.role === 'manager') {
-      const teams = readData(TEAMS_FILE);
-      const filteredTeams = teams.filter(t => t.managerId !== id);
-      writeData(TEAMS_FILE, filteredTeams);
-    }
-    
-    console.log(`用戶 ${deletedUser.email} 已被刪除`);
-    res.json({ success: true, message: '用戶已刪除' });
+    res.json(userResponse);
   } catch (error) {
-    console.error('Delete user error:', error);
-    res.status(500).json({ error: '刪除用戶失敗' });
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
 // ==================== 團隊 API ====================
 
-// 創建團隊
-app.post('/api/teams', (req, res) => {
+// 建立團隊
+app.post('/api/teams', async (req, res) => {
   try {
     const { name, managerId } = req.body;
     
-    if (!name || !managerId) {
-      return res.status(400).json({ error: '請提供團隊名稱和管理者 ID' });
+    // 檢查用戶是否存在
+    const user = await User.findOne({ id: managerId });
+    if (!user) {
+      return res.status(404).json({ error: '找不到用戶' });
     }
     
-    const teams = readData(TEAMS_FILE);
-    const inviteCode = generateInviteCode();
+    // 檢查用戶是否已有團隊
+    if (user.teamId) {
+      return res.status(400).json({ error: '您已經是團隊成員' });
+    }
     
-    const newTeam = {
+    // 生成唯一邀請碼
+    let inviteCode;
+    let codeExists = true;
+    while (codeExists) {
+      inviteCode = generateInviteCode();
+      codeExists = await Team.findOne({ inviteCode });
+    }
+    
+    // 建立團隊
+    const newTeam = new Team({
       id: uuidv4(),
       name,
       managerId,
-      inviteCode,
-      createdAt: new Date().toISOString()
-    };
+      inviteCode
+    });
     
-    teams.push(newTeam);
-    writeData(TEAMS_FILE, teams);
+    await newTeam.save();
     
-    // 更新管理者的 teamId
-    const users = readData(USERS_FILE);
-    const managerIndex = users.findIndex(u => u.id === managerId);
-    if (managerIndex !== -1) {
-      users[managerIndex].teamId = newTeam.id;
-      writeData(USERS_FILE, users);
-    }
+    // 更新用戶為主管並加入團隊
+    user.role = 'manager';
+    user.teamId = newTeam.id;
+    await user.save();
     
     res.status(201).json(newTeam);
   } catch (error) {
-    console.error('Create team error:', error);
-    res.status(500).json({ error: '創建團隊失敗' });
+    console.error('建立團隊錯誤:', error);
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
 // 用邀請碼加入團隊
-app.post('/api/teams/join', (req, res) => {
+app.post('/api/teams/join', async (req, res) => {
   try {
     const { inviteCode, userId } = req.body;
     
-    if (!inviteCode || !userId) {
-      return res.status(400).json({ error: '請提供邀請碼和用戶 ID' });
-    }
-    
-    const teams = readData(TEAMS_FILE);
-    const team = teams.find(t => t.inviteCode === inviteCode.toUpperCase());
-    
+    // 查找團隊
+    const team = await Team.findOne({ inviteCode: inviteCode.toUpperCase() });
     if (!team) {
       return res.status(404).json({ error: '邀請碼無效' });
     }
     
-    // 更新用戶的 teamId
-    const users = readData(USERS_FILE);
-    const userIndex = users.findIndex(u => u.id === userId);
-    
-    if (userIndex === -1) {
+    // 查找用戶
+    const user = await User.findOne({ id: userId });
+    if (!user) {
       return res.status(404).json({ error: '找不到用戶' });
     }
     
-    users[userIndex].teamId = team.id;
-    writeData(USERS_FILE, users);
+    // 檢查用戶是否已有團隊
+    if (user.teamId) {
+      return res.status(400).json({ error: '您已經是其他團隊的成員' });
+    }
     
-    const { password: _, ...userWithoutPassword } = users[userIndex];
-    res.json({ team, user: userWithoutPassword });
+    // 更新用戶團隊
+    user.teamId = team.id;
+    await user.save();
+    
+    res.json({ team, user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      avatar: user.avatar,
+      teamId: user.teamId,
+      isPremium: user.isPremium
+    }});
   } catch (error) {
-    console.error('Join team error:', error);
-    res.status(500).json({ error: '加入團隊失敗' });
+    console.error('加入團隊錯誤:', error);
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
 // 獲取團隊資訊
-app.get('/api/teams/:id', (req, res) => {
+app.get('/api/teams/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const teams = readData(TEAMS_FILE);
-    const team = teams.find(t => t.id === id);
-    
+    const team = await Team.findOne({ id: req.params.id });
+    if (!team) {
+      return res.status(404).json({ error: '找不到團隊' });
+    }
+    res.json(team);
+  } catch (error) {
+    res.status(500).json({ error: '伺服器錯誤' });
+  }
+});
+
+// 獲取團隊成員
+app.get('/api/teams/:id/members', async (req, res) => {
+  try {
+    const members = await User.find({ teamId: req.params.id });
+    const membersResponse = members.map(m => ({
+      id: m.id,
+      email: m.email,
+      name: m.name,
+      role: m.role,
+      avatar: m.avatar
+    }));
+    res.json(membersResponse);
+  } catch (error) {
+    res.status(500).json({ error: '伺服器錯誤' });
+  }
+});
+
+// 獲取團隊員工（不含主管）
+app.get('/api/teams/:id/employees', async (req, res) => {
+  try {
+    const team = await Team.findOne({ id: req.params.id });
     if (!team) {
       return res.status(404).json({ error: '找不到團隊' });
     }
     
-    res.json(team);
+    const employees = await User.find({ 
+      teamId: req.params.id, 
+      id: { $ne: team.managerId } 
+    });
+    
+    const employeesResponse = employees.map(e => ({
+      id: e.id,
+      email: e.email,
+      name: e.name,
+      role: e.role,
+      avatar: e.avatar
+    }));
+    
+    res.json(employeesResponse);
   } catch (error) {
-    console.error('Get team error:', error);
-    res.status(500).json({ error: '獲取團隊失敗' });
-  }
-});
-
-// 獲取團隊所有成員（包含主管和員工）
-app.get('/api/teams/:id/members', (req, res) => {
-  try {
-    const { id } = req.params;
-    const users = readData(USERS_FILE);
-    
-    const members = users
-      .filter(u => u.teamId === id)
-      .map(({ password, ...user }) => user);
-    
-    console.log(`Team ${id} members:`, members.length);
-    res.json(members);
-  } catch (error) {
-    console.error('Get members error:', error);
-    res.status(500).json({ error: '獲取成員列表失敗' });
-  }
-});
-
-// 獲取團隊成員（員工）
-app.get('/api/teams/:id/employees', (req, res) => {
-  try {
-    const { id } = req.params;
-    const users = readData(USERS_FILE);
-    
-    const employees = users
-      .filter(u => u.teamId === id && u.role === 'employee')
-      .map(({ password, ...user }) => user);
-    
-    console.log(`Team ${id} employees:`, employees.length);
-    res.json(employees);
-  } catch (error) {
-    console.error('Get employees error:', error);
-    res.status(500).json({ error: '獲取員工列表失敗' });
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
 // ==================== 工作 API ====================
 
 // 獲取用戶的工作列表
-app.get('/api/jobs/user/:userId', (req, res) => {
+app.get('/api/jobs', async (req, res) => {
   try {
-    const { userId } = req.params;
-    const jobs = readData(JOBS_FILE);
-    const userJobs = jobs.filter(j => j.userId === userId);
-    res.json(userJobs);
+    const { userId } = req.query;
+    if (!userId) {
+      return res.status(400).json({ error: '需要提供 userId' });
+    }
+    
+    const jobs = await Job.find({ userId, isActive: true });
+    res.json(jobs);
   } catch (error) {
-    console.error('Get jobs error:', error);
-    res.status(500).json({ error: '獲取工作列表失敗' });
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
 // 新增工作
-app.post('/api/jobs', (req, res) => {
+app.post('/api/jobs', async (req, res) => {
   try {
-    const { userId, name, hourlyRate, maxHoursPerDay } = req.body;
+    const { userId, name, hourlyRate, dailyLimit, color } = req.body;
     
-    if (!userId || !name || !hourlyRate) {
-      return res.status(400).json({ error: '請填寫所有必要欄位' });
-    }
-    
-    const jobs = readData(JOBS_FILE);
-    
-    const newJob = {
+    const newJob = new Job({
       id: uuidv4(),
       userId,
       name,
       hourlyRate,
-      maxHoursPerDay: maxHoursPerDay || 8,
-      createdAt: new Date().toISOString()
-    };
+      dailyLimit: dailyLimit || null,
+      color: color || '#6366f1',
+      isActive: true
+    });
     
-    jobs.push(newJob);
-    writeData(JOBS_FILE, jobs);
-    
+    await newJob.save();
     res.status(201).json(newJob);
   } catch (error) {
-    console.error('Create job error:', error);
-    res.status(500).json({ error: '新增工作失敗' });
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
 // 更新工作
-app.put('/api/jobs/:id', (req, res) => {
+app.put('/api/jobs/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const updates = req.body;
-    
-    const jobs = readData(JOBS_FILE);
-    const index = jobs.findIndex(j => j.id === id);
-    
-    if (index === -1) {
+    const job = await Job.findOne({ id: req.params.id });
+    if (!job) {
       return res.status(404).json({ error: '找不到工作' });
     }
     
-    delete updates.id;
-    jobs[index] = { ...jobs[index], ...updates };
-    writeData(JOBS_FILE, jobs);
+    const { name, hourlyRate, dailyLimit, color, isActive } = req.body;
     
-    res.json(jobs[index]);
+    if (name !== undefined) job.name = name;
+    if (hourlyRate !== undefined) job.hourlyRate = hourlyRate;
+    if (dailyLimit !== undefined) job.dailyLimit = dailyLimit;
+    if (color !== undefined) job.color = color;
+    if (isActive !== undefined) job.isActive = isActive;
+    
+    await job.save();
+    res.json(job);
   } catch (error) {
-    console.error('Update job error:', error);
-    res.status(500).json({ error: '更新工作失敗' });
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
 // 刪除工作
-app.delete('/api/jobs/:id', (req, res) => {
+app.delete('/api/jobs/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const jobs = readData(JOBS_FILE);
-    const filteredJobs = jobs.filter(j => j.id !== id);
-    
-    if (filteredJobs.length === jobs.length) {
+    const job = await Job.findOne({ id: req.params.id });
+    if (!job) {
       return res.status(404).json({ error: '找不到工作' });
     }
     
-    writeData(JOBS_FILE, filteredJobs);
-    res.json({ success: true });
+    job.isActive = false;
+    await job.save();
+    
+    res.json({ message: '工作已刪除' });
   } catch (error) {
-    console.error('Delete job error:', error);
-    res.status(500).json({ error: '刪除工作失敗' });
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
 // ==================== 打卡記錄 API ====================
 
 // 獲取用戶的打卡記錄
-app.get('/api/records/user/:userId', (req, res) => {
+app.get('/api/records', async (req, res) => {
   try {
-    const { userId } = req.params;
-    const records = readData(RECORDS_FILE);
-    const userRecords = records.filter(r => r.userId === userId);
-    res.json(userRecords);
+    const { userId, startDate, endDate } = req.query;
+    
+    let query = {};
+    if (userId) query.userId = userId;
+    
+    if (startDate || endDate) {
+      query.clockIn = {};
+      if (startDate) query.clockIn.$gte = new Date(startDate);
+      if (endDate) query.clockIn.$lte = new Date(endDate);
+    }
+    
+    const records = await Record.find(query).sort({ clockIn: -1 });
+    res.json(records);
   } catch (error) {
-    console.error('Get records error:', error);
-    res.status(500).json({ error: '獲取打卡記錄失敗' });
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
-// 新增打卡記錄（上班打卡）
-app.post('/api/records', (req, res) => {
+// 獲取特定用戶的打卡記錄
+app.get('/api/records/user/:userId', async (req, res) => {
   try {
-    const { userId, jobId, clockIn, clockInPhoto } = req.body;
+    const records = await Record.find({ userId: req.params.userId }).sort({ clockIn: -1 });
+    res.json(records);
+  } catch (error) {
+    res.status(500).json({ error: '伺服器錯誤' });
+  }
+});
+
+// 上班打卡
+app.post('/api/records/clock-in', async (req, res) => {
+  try {
+    const { userId, jobId, clockInPhoto } = req.body;
     
-    if (!userId || !jobId || !clockIn) {
-      return res.status(400).json({ error: '請填寫所有必要欄位' });
+    // 檢查是否有未完成的打卡
+    const activeRecord = await Record.findOne({ userId, clockOut: null });
+    if (activeRecord) {
+      return res.status(400).json({ error: '您有未完成的打卡記錄，請先下班打卡' });
     }
     
-    const records = readData(RECORDS_FILE);
-    
-    const newRecord = {
+    const now = new Date();
+    const newRecord = new Record({
       id: uuidv4(),
       userId,
       jobId,
-      clockIn,
+      clockIn: now,
       clockInPhoto: clockInPhoto || null,
       clockOut: null,
       clockOutPhoto: null,
-      date: clockIn.split('T')[0],
-      createdAt: new Date().toISOString()
-    };
+      date: now.toISOString().split('T')[0]
+    });
     
-    records.push(newRecord);
-    writeData(RECORDS_FILE, records);
-    
+    await newRecord.save();
     res.status(201).json(newRecord);
   } catch (error) {
-    console.error('Create record error:', error);
-    res.status(500).json({ error: '打卡失敗' });
+    console.error('上班打卡錯誤:', error);
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
-// 更新打卡記錄（下班打卡）
-app.put('/api/records/:id', (req, res) => {
+// 下班打卡
+app.post('/api/records/clock-out', async (req, res) => {
   try {
-    const { id } = req.params;
-    const updates = req.body;
+    const { userId, clockOutPhoto } = req.body;
     
-    const records = readData(RECORDS_FILE);
-    const index = records.findIndex(r => r.id === id);
+    // 查找未完成的打卡記錄
+    const record = await Record.findOne({ userId, clockOut: null });
+    if (!record) {
+      return res.status(400).json({ error: '找不到進行中的打卡記錄' });
+    }
     
-    if (index === -1) {
+    record.clockOut = new Date();
+    record.clockOutPhoto = clockOutPhoto || null;
+    
+    await record.save();
+    res.json(record);
+  } catch (error) {
+    console.error('下班打卡錯誤:', error);
+    res.status(500).json({ error: '伺服器錯誤' });
+  }
+});
+
+// 獲取當前打卡狀態
+app.get('/api/records/current/:userId', async (req, res) => {
+  try {
+    const record = await Record.findOne({ userId: req.params.userId, clockOut: null });
+    res.json(record || null);
+  } catch (error) {
+    res.status(500).json({ error: '伺服器錯誤' });
+  }
+});
+
+// 刪除打卡記錄
+app.delete('/api/records/:id', async (req, res) => {
+  try {
+    const result = await Record.deleteOne({ id: req.params.id });
+    if (result.deletedCount === 0) {
       return res.status(404).json({ error: '找不到打卡記錄' });
     }
-    
-    delete updates.id;
-    records[index] = { ...records[index], ...updates };
-    writeData(RECORDS_FILE, records);
-    
-    res.json(records[index]);
+    res.json({ message: '記錄已刪除' });
   } catch (error) {
-    console.error('Update record error:', error);
-    res.status(500).json({ error: '更新打卡記錄失敗' });
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
-// ==================== 排班 API ====================
+// ==================== 班表 API ====================
 
-// 獲取用戶的排班
-app.get('/api/schedules/user/:userId', (req, res) => {
+// 獲取用戶班表
+app.get('/api/schedules', async (req, res) => {
   try {
-    const { userId } = req.params;
-    const schedules = readData(SCHEDULES_FILE);
-    const userSchedules = schedules.filter(s => s.userId === userId);
-    res.json(userSchedules);
-  } catch (error) {
-    console.error('Get schedules error:', error);
-    res.status(500).json({ error: '獲取排班失敗' });
-  }
-});
-
-// 獲取團隊的所有排班
-app.get('/api/schedules/team/:teamId', (req, res) => {
-  try {
-    const { teamId } = req.params;
-    const schedules = readData(SCHEDULES_FILE);
-    const users = readData(USERS_FILE);
-    
-    // 獲取團隊成員 ID
-    const teamUserIds = users
-      .filter(u => u.teamId === teamId)
-      .map(u => u.id);
-    
-    const teamSchedules = schedules.filter(s => teamUserIds.includes(s.userId));
-    res.json(teamSchedules);
-  } catch (error) {
-    console.error('Get team schedules error:', error);
-    res.status(500).json({ error: '獲取團隊排班失敗' });
-  }
-});
-
-// 新增排班
-app.post('/api/schedules', (req, res) => {
-  try {
-    const { userId, date, startTime, endTime, note, createdBy } = req.body;
-    
-    if (!userId || !date || !startTime || !endTime) {
-      return res.status(400).json({ error: '請填寫所有必要欄位' });
+    const { userId } = req.query;
+    if (!userId) {
+      return res.status(400).json({ error: '需要提供 userId' });
     }
     
-    const schedules = readData(SCHEDULES_FILE);
-    
-    const newSchedule = {
-      id: uuidv4(),
-      userId,
-      date,
-      startTime,
-      endTime,
-      note: note || '',
-      createdBy: createdBy || userId,
-      createdAt: new Date().toISOString()
-    };
-    
-    schedules.push(newSchedule);
-    writeData(SCHEDULES_FILE, schedules);
-    
-    res.status(201).json(newSchedule);
+    const schedules = await Schedule.find({ userId });
+    res.json(schedules);
   } catch (error) {
-    console.error('Create schedule error:', error);
-    res.status(500).json({ error: '新增排班失敗' });
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
-// 更新排班
-app.put('/api/schedules/:id', (req, res) => {
+// 新增/更新班表
+app.post('/api/schedules', async (req, res) => {
   try {
-    const { id } = req.params;
-    const updates = req.body;
+    const { userId, jobId, dayOfWeek, startTime, endTime } = req.body;
     
-    const schedules = readData(SCHEDULES_FILE);
-    const index = schedules.findIndex(s => s.id === id);
+    // 檢查是否已存在
+    let schedule = await Schedule.findOne({ userId, jobId, dayOfWeek });
     
-    if (index === -1) {
-      return res.status(404).json({ error: '找不到排班' });
+    if (schedule) {
+      schedule.startTime = startTime;
+      schedule.endTime = endTime;
+      await schedule.save();
+    } else {
+      schedule = new Schedule({
+        id: uuidv4(),
+        userId,
+        jobId,
+        dayOfWeek,
+        startTime,
+        endTime
+      });
+      await schedule.save();
     }
     
-    delete updates.id;
-    schedules[index] = { ...schedules[index], ...updates };
-    writeData(SCHEDULES_FILE, schedules);
-    
-    res.json(schedules[index]);
+    res.status(201).json(schedule);
   } catch (error) {
-    console.error('Update schedule error:', error);
-    res.status(500).json({ error: '更新排班失敗' });
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
-// 刪除排班
-app.delete('/api/schedules/:id', (req, res) => {
+// 刪除班表
+app.delete('/api/schedules/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const schedules = readData(SCHEDULES_FILE);
-    const filteredSchedules = schedules.filter(s => s.id !== id);
-    
-    if (filteredSchedules.length === schedules.length) {
-      return res.status(404).json({ error: '找不到排班' });
+    const result = await Schedule.deleteOne({ id: req.params.id });
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: '找不到班表' });
     }
-    
-    writeData(SCHEDULES_FILE, filteredSchedules);
-    res.json({ success: true });
+    res.json({ message: '班表已刪除' });
   } catch (error) {
-    console.error('Delete schedule error:', error);
-    res.status(500).json({ error: '刪除排班失敗' });
+    res.status(500).json({ error: '伺服器錯誤' });
   }
 });
 
@@ -811,5 +753,4 @@ app.get('*', (req, res) => {
 // 啟動伺服器
 app.listen(PORT, () => {
   console.log(`🚀 伺服器運行於 port ${PORT}`);
-  console.log('📁 資料儲存於 ./data 目錄');
 });
