@@ -128,7 +128,7 @@ export const jobDB = {
     return await db.jobs
       .where('userId')
       .equals(userId)
-      .filter(job => job.isActive)
+      .filter(job => job.isActive === true)
       .toArray()
   },
 

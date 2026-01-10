@@ -280,7 +280,7 @@ export const useJobStore = create<JobState>()((set) => ({
         userId: jobData.userId,
         name: jobData.name,
         hourlyRate: jobData.hourlyRate,
-        maxHoursPerDay: jobData.maxHoursPerDay
+        maxHoursPerDay: jobData.dailyHourLimit || jobData.maxHoursPerDay
       }) as Job
       
       set(state => ({

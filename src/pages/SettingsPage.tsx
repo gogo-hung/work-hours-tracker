@@ -85,7 +85,7 @@ export function SettingsPage() {
       return
     }
     
-    const success = await createTeam(teamName.trim(), teamDescription.trim() || undefined)
+    const success = await createTeam(teamName.trim())
     if (success) {
       setShowTeamModal(false)
       resetTeamForm()

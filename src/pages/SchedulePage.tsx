@@ -141,7 +141,7 @@ export function SchedulePage() {
     setStartTime(schedule.startTime)
     setEndTime(schedule.endTime)
     setNote(schedule.note || '')
-    setSelectedDate(schedule.date)
+    setSelectedDate(String(schedule.date))
     setShowAddModal(true)
   }
   
@@ -190,13 +190,15 @@ export function SchedulePage() {
   const selectedDateSchedules = selectedDate ? getSchedulesForDate(selectedDate) : []
   
   // 取得工作名稱
-  const getJobName = (jobId: string) => {
+  const getJobName = (jobId?: string) => {
+    if (!jobId) return '未知工作'
     const job = jobs.find(j => j.id === jobId)
     return job?.name || '未知工作'
   }
   
   // 取得工作顏色
-  const getJobColor = (jobId: string) => {
+  const getJobColor = (jobId?: string) => {
+    if (!jobId) return '#6366f1'
     const job = jobs.find(j => j.id === jobId)
     return job?.color || '#6366f1'
   }
@@ -378,7 +380,7 @@ export function SchedulePage() {
               ) : (
                 <div className="space-y-2">
                   {schedules
-                    .sort((a, b) => a.date.localeCompare(b.date))
+                    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
                     .map(schedule => (
                       <div
                         key={schedule.id}
@@ -391,7 +393,7 @@ export function SchedulePage() {
                           />
                           <div>
                             <p className="text-sm font-medium text-gray-900">
-                              {schedule.date.split('-').slice(1).join('/')}
+                              {String(schedule.date).split('-').slice(1).join('/')}
                             </p>
                             <p className="text-xs text-gray-500">
                               {schedule.startTime} - {schedule.endTime}

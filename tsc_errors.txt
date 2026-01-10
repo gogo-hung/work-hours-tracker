@@ -1,0 +1,13 @@
+﻿src/db/index.ts(131,22): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(filter: (x: Job) => x is Job): Collection<Job, any, Job>', gave the following error.
+    Type 'boolean | undefined' is not assignable to type 'boolean'.
+      Type 'undefined' is not assignable to type 'boolean'.
+  Overload 2 of 2, '(filter: (x: Job) => boolean): Collection<Job, any, Job>', gave the following error.
+    Type 'boolean | undefined' is not assignable to type 'boolean'.
+      Type 'undefined' is not assignable to type 'boolean'.
+src/pages/SchedulePage.tsx(144,21): error TS2345: Argument of type 'string | Date' is not assignable to parameter of type 'SetStateAction<string | null>'.
+  Type 'Date' is not assignable to type 'SetStateAction<string | null>'.
+src/pages/SchedulePage.tsx(344,67): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/pages/SchedulePage.tsx(391,67): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.

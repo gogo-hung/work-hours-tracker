@@ -16,6 +16,7 @@ export interface Team {
 export interface User {
   id: string
   username: string
+  name?: string // 後端使用的名稱欄位
   email: string
   password: string // 加密儲存
   avatar?: string // 頭像 (base64)
@@ -47,10 +48,11 @@ export interface Job {
   name: string
   hourlyRate: number // 時薪
   dailyHourLimit: number // 每日工時上限
-  color: string // 識別顏色
-  isActive: boolean
+  maxHoursPerDay?: number // 後端使用的每日工時上限欄位
+  color?: string // 識別顏色
+  isActive?: boolean
   createdAt: Date
-  updatedAt: Date
+  updatedAt?: Date
 }
 
 // 打卡紀錄
