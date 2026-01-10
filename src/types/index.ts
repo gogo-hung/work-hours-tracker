@@ -30,13 +30,14 @@ export interface User {
 export interface Schedule {
   id: string
   userId: string
-  jobId: string
-  date: string // YYYY-MM-DD 格式
+  jobId?: string
+  date: Date | string // YYYY-MM-DD 格式或 Date 物件
   startTime: string // HH:mm 格式
   endTime: string // HH:mm 格式
   note?: string
+  createdBy?: string
   createdAt: Date
-  updatedAt: Date
+  updatedAt?: Date
 }
 
 // 工作資料
